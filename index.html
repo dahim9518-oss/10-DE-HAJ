@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -224,13 +225,11 @@ select.adm-inp option{background:#1A2736;color:#fff;}
     <div class="card-title"><span class="icon icon-gold">👤</span>سجّل إنجازات اليوم باسمك</div>
     <div class="mem-tabs" id="memTabs"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
-      <div class="score-ring">
-        <svg width="110" height="110" viewBox="0 0 110 110">
-          <circle cx="55" cy="55" r="48" fill="none" stroke="#eee" stroke-width="8"/>
-          <circle cx="55" cy="55" r="48" fill="none" stroke="url(#rg)" stroke-width="8" stroke-linecap="round" id="ringProg" stroke-dasharray="301.6" stroke-dashoffset="301.6"/>
-          <defs><linearGradient id="rg" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#2D9B6F"/><stop offset="100%" stop-color="#C8972B"/></linearGradient></defs>
-        </svg>
-        <div class="ring-txt"><div class="score-num" id="todayScore">0</div><div style="font-size:11px;color:var(--ink-soft);">نقطة اليوم</div></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:6px;min-width:130px;">
+        <div style="font-size:12px;font-weight:700;color:var(--ink-soft);letter-spacing:1px;">مجموع نقاطك</div>
+        <div id="totalScoreNum" style="font-family:'Amiri',serif;font-size:58px;font-weight:700;color:var(--gold);line-height:1;">0</div>
+        <div style="font-size:12px;color:var(--ink-soft);">نقطة</div>
+        <div id="totalScoreRank" style="font-size:11px;font-weight:700;padding:3px 12px;border-radius:20px;background:var(--emerald-pale);color:var(--emerald);margin-top:2px;"></div>
       </div>
       <div style="flex:1;min-width:180px;">
         <div style="font-size:13px;color:var(--ink-soft);margin-bottom:8px;">إضافة فرد جديد</div>
@@ -654,6 +653,7 @@ const dayChecks=(m,d)=>m.checks[dk(d)]||{};
 
 function totalPts(m,i){
   let t=0;
+  // نقاط التحديات والكويز
   for(const dc of Object.values(m.checks))
     for(const [id,val] of Object.entries(dc))
       if(val){
@@ -661,6 +661,19 @@ function totalPts(m,i){
         if(ch) t+=ch.pts;
         else if(id.startsWith('qz_')) t+=typeof val==='number'?val:10;
       }
+  // نقاط القرآن: كل أوجه العضو في كل الأيام × 5
+  if(S.quranCounter){
+    Object.entries(S.quranCounter)
+      .filter(([k])=>k.startsWith('qr_'+i+'_'))
+      .forEach(([,v])=>{ t+=(v.pages||0)*5; });
+  }
+  // نقاط الذكر: كل مئات العضو في كل الأيام × 5
+  if(S.dhikrCounter){
+    Object.entries(S.dhikrCounter)
+      .filter(([k])=>k.startsWith('dk_'+i+'_'))
+      .forEach(([,v])=>{ t+=(v.rounds||0)*5; });
+  }
+  // مكافآت يدوية من الإدارة
   if(i!==undefined&&S.bonus[i])t+=S.bonus[i];
   return Math.max(0,t);
 }
@@ -759,14 +772,14 @@ function renderLeaderboard(){
 }
 
 function renderScore(){
-  const m=cur(),checks=dayChecks(m,S.day);
-  let pts=0;
-  for(const [id,done] of Object.entries(checks)){
-    if(done){const ch=S.challenges.find(c=>c.id===id);if(ch)pts+=ch.pts;else if(id.startsWith('qz_'))pts+=10;}
-  }
-  const maxP=S.challenges.reduce((a,c)=>a+c.pts,0);
-  document.getElementById('todayScore').textContent=pts;
-  document.getElementById('ringProg').style.strokeDashoffset=301.6*(1-Math.min(pts/Math.max(maxP,1),1));
+  const myPts=totalPts(cur(),S.mem);
+  document.getElementById('totalScoreNum').textContent=myPts;
+  // حساب الترتيب
+  const allPts=S.members.map((m,i)=>totalPts(m,i)).sort((a,b)=>b-a);
+  const rank=allPts.indexOf(myPts)+1;
+  const rankEl=document.getElementById('totalScoreRank');
+  const medals=['🥇 الأول','🥈 الثاني','🥉 الثالث'];
+  rankEl.textContent=medals[rank-1]||('المركز '+rank);
 }
 
 function renderRems(){
@@ -1195,7 +1208,7 @@ function resetWheelUsed(i){
 function getQuranKey(){return 'qr_'+S.mem+'_'+dk(S.day);}
 function getQuranData(){
   if(!S.quranCounter)S.quranCounter={};
-  if(!S.quranCounter[getQuranKey()])S.quranCounter[getQuranKey()]={pages:0,pts:0};
+  if(!S.quranCounter[getQuranKey()])S.quranCounter[getQuranKey()]={pages:0};
   return S.quranCounter[getQuranKey()];
 }
 function getTotalQuranPages(){
@@ -1204,14 +1217,16 @@ function getTotalQuranPages(){
     .filter(([k])=>k.startsWith('qr_'+S.mem+'_'))
     .reduce((a,[,v])=>a+(v.pages||0),0);
 }
+function getQuranPtsToday(){
+  // نقاط القرآن = عدد الأوجه × 5 لكل عضو ولكل يوم
+  const d=getQuranData();
+  return (d.pages||0)*5;
+}
 function tapQuran(){
   const btn=document.getElementById('quranBtn');
   btn.classList.remove('tap-pulse');void btn.offsetWidth;btn.classList.add('tap-pulse');
   const d=getQuranData();
-  d.pages++;
-  d.pts=d.pages*5;
-  // Add points as bonus
-  S.bonus[S.mem]=(S.bonus[S.mem]||0)+5;
+  d.pages=(d.pages||0)+1;
   if(!S.quranCounter)S.quranCounter={};
   S.quranCounter[getQuranKey()]=d;
   save();renderQuranCounter();render();
@@ -1219,26 +1234,24 @@ function tapQuran(){
 }
 function resetQuranToday(){
   if(!confirm('إعادة عداد الأوجه لهذا اليوم؟'))return;
-  const d=getQuranData();
-  // Remove previously added pts
-  S.bonus[S.mem]=Math.max(0,(S.bonus[S.mem]||0)-d.pts);
-  d.pages=0;d.pts=0;
-  S.quranCounter[getQuranKey()]=d;
+  if(!S.quranCounter)S.quranCounter={};
+  S.quranCounter[getQuranKey()]={pages:0};
   save();renderQuranCounter();render();
 }
 function renderQuranCounter(){
   const d=getQuranData();
-  document.getElementById('quranCount').textContent=d.pages;
-  document.getElementById('quranPts').textContent=d.pts+' نقطة';
+  const pts=getQuranPtsToday();
+  document.getElementById('quranCount').textContent=d.pages||0;
+  document.getElementById('quranPts').textContent=pts+' نقطة';
   document.getElementById('quranTotal').textContent=getTotalQuranPages()+' وجه';
 }
 
 // ===== DHIKR COUNTER =====
-let _dhikrSession=0,_dhikrRounds=0;
+let _dhikrSession=0;
 function getDhikrKey(){return 'dk_'+S.mem+'_'+dk(S.day);}
 function getDhikrData(){
   if(!S.dhikrCounter)S.dhikrCounter={};
-  if(!S.dhikrCounter[getDhikrKey()])S.dhikrCounter[getDhikrKey()]={total:0,pts:0};
+  if(!S.dhikrCounter[getDhikrKey()])S.dhikrCounter[getDhikrKey()]={total:0,rounds:0};
   return S.dhikrCounter[getDhikrKey()];
 }
 function tapDhikr(){
@@ -1246,14 +1259,11 @@ function tapDhikr(){
   btn.classList.remove('tap-pulse');void btn.offsetWidth;btn.classList.add('tap-pulse');
   _dhikrSession++;
   const d=getDhikrData();
-  d.total++;
-  // Every 100 = 5 pts
-  const newRounds=Math.floor(_dhikrSession/100);
-  if(newRounds>_dhikrRounds){
-    const earned=(newRounds-_dhikrRounds)*5;
-    _dhikrRounds=newRounds;
-    d.pts+=earned;
-    S.bonus[S.mem]=(S.bonus[S.mem]||0)+earned;
+  d.total=(d.total||0)+1;
+  // كل 100 ذكر = مئة جديدة
+  const newRounds=Math.floor(d.total/100);
+  if(newRounds>(d.rounds||0)){
+    d.rounds=newRounds;
     if(!S.dhikrCounter)S.dhikrCounter={};
     S.dhikrCounter[getDhikrKey()]=d;
     save();render();
@@ -1266,21 +1276,23 @@ function tapDhikr(){
   renderDhikrCounter();
 }
 function resetDhikrSession(){
-  _dhikrSession=0;_dhikrRounds=0;
+  _dhikrSession=0;
   renderDhikrCounter();
-  showToast('↩ تم إعادة الجلسة');
+  showToast('↩ تم إعادة عرض الجلسة');
 }
 function renderDhikrCounter(){
-  const rem=_dhikrSession%100;
-  const pct=(rem/100)*100;
-  document.getElementById('dhikrCount').textContent=_dhikrSession;
-  document.getElementById('dhikrProg').textContent=rem+'/100';
-  document.getElementById('dhikrRounds').textContent=_dhikrRounds+' مئة';
-  document.getElementById('dhikrBar').style.width=pct+'%';
-  document.getElementById('dhikrPts').textContent=(_dhikrRounds*5)+' نقطة من هذه الجلسة';
   const d=getDhikrData();
-  document.getElementById('dhikrTotal').textContent=(d.total||0)+' ذكر';
-  document.getElementById('dhikrTotalPts').textContent=(d.pts||0)+' نقطة مكتسبة';
+  const total=d.total||0;
+  const rounds=d.rounds||0;
+  const rem=total%100;
+  const pct=(rem/100)*100;
+  document.getElementById('dhikrCount').textContent=total;
+  document.getElementById('dhikrProg').textContent=rem+'/100';
+  document.getElementById('dhikrRounds').textContent=rounds+' مئة';
+  document.getElementById('dhikrBar').style.width=pct+'%';
+  document.getElementById('dhikrPts').textContent=(rounds*5)+' نقطة مكتسبة';
+  document.getElementById('dhikrTotal').textContent=total+' ذكر';
+  document.getElementById('dhikrTotalPts').textContent=(rounds*5)+' نقطة';
 }
 
 
