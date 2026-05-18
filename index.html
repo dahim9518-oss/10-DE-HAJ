@@ -655,8 +655,12 @@ const dayChecks=(m,d)=>m.checks[dk(d)]||{};
 function totalPts(m,i){
   let t=0;
   for(const dc of Object.values(m.checks))
-    for(const [id,done] of Object.entries(dc))
-      if(done){const ch=S.challenges.find(c=>c.id===id);if(ch)t+=ch.pts;else if(id.startsWith('qz_'))t+=10;}
+    for(const [id,val] of Object.entries(dc))
+      if(val){
+        const ch=S.challenges.find(c=>c.id===id);
+        if(ch) t+=ch.pts;
+        else if(id.startsWith('qz_')) t+=typeof val==='number'?val:10;
+      }
   if(i!==undefined&&S.bonus[i])t+=S.bonus[i];
   return Math.max(0,t);
 }
@@ -809,15 +813,38 @@ function renderQuiz(){
   if(!S.quizzes.length){document.getElementById('quizQ').textContent='لا توجد أسئلة';return;}
   const q=S.quizzes[S.qi%S.quizzes.length];
   const pts=q.pts||10;
+  const m=cur();
+  const alreadyAnswered=!!(m.checks[dk(S.day)]&&m.checks[dk(S.day)]['qz_'+S.qi]);
   document.getElementById('quizQ').textContent=q.q;
   // Show pts badge
   const badge=document.getElementById('quizPtsBadge');
-  badge.textContent='+'+pts+' نقطة';badge.style.display='block';
+  if(alreadyAnswered){
+    badge.textContent='✅ أجبت عليه (+'+pts+' نقطة)';
+    badge.style.background='var(--emerald-pale)';badge.style.borderColor='var(--emerald)';badge.style.color='var(--emerald)';
+  } else {
+    badge.textContent='+'+pts+' نقطة';
+    badge.style.background='var(--gold-pale)';badge.style.borderColor='var(--gold)';badge.style.color='var(--gold)';
+  }
+  badge.style.display='block';
   const el=document.getElementById('quizOpts');el.innerHTML='';
-  q.opts.forEach((o,i)=>{const b=document.createElement('div');b.className='quiz-opt';b.textContent=o;b.onclick=()=>answerQ(i);el.appendChild(b);});
-  document.getElementById('quizFb').className='quiz-fb';
-  document.getElementById('nxtBtn').className='nxt-btn';
-  qAnswered=false;
+  q.opts.forEach((o,i)=>{
+    const b=document.createElement('div');
+    b.className='quiz-opt';
+    if(alreadyAnswered){b.style.opacity='.6';b.style.pointerEvents='none';}
+    if(alreadyAnswered&&i===q.ans)b.classList.add('correct');
+    b.textContent=o;
+    b.onclick=()=>answerQ(i);
+    el.appendChild(b);
+  });
+  const fb=document.getElementById('quizFb');
+  if(alreadyAnswered){
+    fb.textContent='✅ أجبت على هذا السؤال وحصلت على '+pts+' نقطة';
+    fb.className='quiz-fb show ok';
+  } else {
+    fb.className='quiz-fb';
+  }
+  document.getElementById('nxtBtn').className='nxt-btn show';
+  qAnswered=alreadyAnswered;
 }
 function answerQ(i){
   if(qAnswered)return;qAnswered=true;
@@ -828,13 +855,16 @@ function answerQ(i){
   const fb=document.getElementById('quizFb');
   if(i===q.ans){
     fb.textContent='✅ أحسنت! '+(q.exp||'');fb.className='quiz-fb show ok';
-    const m=cur();if(!m.checks[dk(S.day)])m.checks[dk(S.day)]={};
-    // Store pts per question key so we can use custom pts
-    if(!m.checks[dk(S.day)]['qz_'+S.qi]){
-      m.checks[dk(S.day)]['qz_'+S.qi]=true;
-      S.bonus[S.mem]=(S.bonus[S.mem]||0)+pts;
+    const m=cur();
+    if(!m.checks[dk(S.day)])m.checks[dk(S.day)]={};
+    const key='qz_'+S.qi;
+    // Only add if not answered before — store pts as the value (not true) so totalPts reads it correctly
+    if(!m.checks[dk(S.day)][key]){
+      m.checks[dk(S.day)][key]=pts;
+      save();render();showToast('🌟 +'+pts+' نقطة!');
+    } else {
+      showToast('✅ أجبت على هذا السؤال من قبل');
     }
-    save();render();showToast('🌟 +'+pts+' نقطة!');
   } else {
     fb.textContent='❌ الإجابة: '+q.opts[q.ans]+'. '+(q.exp||'');fb.className='quiz-fb show no';
   }
